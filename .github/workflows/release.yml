@@ -1,0 +1,88 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Package & Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set version from tag
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_ENV"
+
+      - name: Package macOS archive
+        run: |
+          mkdir -p release/spotiytm-mac
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='checkpoints' \
+            --exclude='oauth.json' \
+            --exclude='headers_auth.json' \
+            --exclude='*.log' \
+            --exclude='release' \
+            --exclude='Start.bat' \
+            --exclude='Uninstall.bat' \
+            . release/spotiytm-mac/
+          chmod +x release/spotiytm-mac/Start.command
+          chmod +x release/spotiytm-mac/Uninstall.command
+          chmod +x release/spotiytm-mac/run.sh
+          cd release
+          zip -r "spotiytm-$VERSION-mac.zip" spotiytm-mac/
+
+      - name: Package Windows archive
+        run: |
+          mkdir -p release/spotiytm-windows
+          rsync -a \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='.venv' \
+            --exclude='__pycache__' \
+            --exclude='*.pyc' \
+            --exclude='checkpoints' \
+            --exclude='oauth.json' \
+            --exclude='headers_auth.json' \
+            --exclude='*.log' \
+            --exclude='release' \
+            --exclude='Start.command' \
+            --exclude='Uninstall.command' \
+            --exclude='run.sh' \
+            . release/spotiytm-windows/
+          cd release
+          zip -r "spotiytm-$VERSION-windows.zip" spotiytm-windows/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "spotiytm ${{ env.VERSION }}"
+          body: |
+            ## Install
+
+            ### macOS
+            1. Download `spotiytm-${{ env.VERSION }}-mac.zip` and unzip it
+            2. Right-click `Start.command` → **Open** (first run only, bypasses Gatekeeper)
+            3. Your browser opens at `http://localhost:3000`
+
+            ### Windows
+            1. Download `spotiytm-${{ env.VERSION }}-windows.zip` and unzip it
+            2. Double-click `Start.bat`
+            3. Your browser opens at `http://localhost:3000`
+
+            > **Requires Python 3.10+** — [python.org](https://www.python.org/downloads/)
+            > The launcher handles virtualenv and dependencies automatically on first run (~2 min).
+          files: |
+            release/spotiytm-${{ env.VERSION }}-mac.zip
+            release/spotiytm-${{ env.VERSION }}-windows.zip
+          draft: false
+          prerelease: false
