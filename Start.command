@@ -3,6 +3,8 @@
 # Double-click to run. First time: right-click → Open (Gatekeeper step).
 
 cd "$(dirname "$0")"
+VENV=".venv"
+EXPECTED_VENV_PATH="$(pwd)/$VENV"
 
 # ── Python check ────────────────────────────────────────────────────────────
 PYTHON=""
@@ -41,18 +43,30 @@ echo "  ────────────────────────
 echo ""
 
 # ── Step 1: Virtual environment ──────────────────────────────────────────────
-if [ ! -d ".venv" ]; then
+venv_ok() {
+    [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import sys" >/dev/null 2>&1 || return 1
+    if [ -f "$VENV/pyvenv.cfg" ] && grep -q "^command = " "$VENV/pyvenv.cfg"; then
+        grep -Fq "$EXPECTED_VENV_PATH" "$VENV/pyvenv.cfg"
+    fi
+}
+
+if [ -d "$VENV" ] && ! venv_ok; then
+    echo "  Step 1/3: Rebuilding moved or broken environment…"
+    rm -rf "$VENV"
+fi
+
+if [ ! -d "$VENV" ]; then
     echo "  Step 1/3: Creating environment (first time only)…"
-    $PYTHON -m venv .venv
+    $PYTHON -m venv "$VENV"
 else
     echo "  Step 1/3: Environment ready ✓"
 fi
 
-source .venv/bin/activate
+source "$VENV/bin/activate"
 
 # ── Step 2: Dependencies ─────────────────────────────────────────────────────
 echo "  Step 2/3: Installing tools (first time: ~2 min)…"
-pip install -r requirements.txt --quiet
+python -m pip install -r requirements.txt --quiet
 
 # ── Step 3: Launch ───────────────────────────────────────────────────────────
 echo "  Step 3/3: Starting app — your browser will open automatically"

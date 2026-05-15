@@ -2,6 +2,7 @@
 cd "$(dirname "$0")"
 
 VENV=".venv"
+EXPECTED_VENV_PATH="$(pwd)/$VENV"
 BOLD="\033[1m"
 GREEN="\033[32m"
 YELLOW="\033[33m"
@@ -12,6 +13,12 @@ RESET="\033[0m"
 ok()   { echo -e "  ${GREEN}✓${RESET}  $1"; }
 step() { echo -e "  ${BOLD}$1${RESET}"; }
 fail() { echo -e "\n  ${RED}✗  Error: $1${RESET}\n"; exit 1; }
+venv_ok() {
+  [ -x "$VENV/bin/python" ] && "$VENV/bin/python" -c "import sys" >/dev/null 2>&1 || return 1
+  if [ -f "$VENV/pyvenv.cfg" ] && grep -q "^command = " "$VENV/pyvenv.cfg"; then
+    grep -Fq "$EXPECTED_VENV_PATH" "$VENV/pyvenv.cfg"
+  fi
+}
 
 echo ""
 echo -e "  ${BOLD}Spotify → YouTube Music${RESET}"
@@ -27,6 +34,11 @@ PYTHON_VERSION=$(python3 --version 2>&1)
 ok "Found $PYTHON_VERSION"
 
 # ── 2. Virtual environment ─────────────────────────────
+if [ -d "$VENV" ] && ! venv_ok; then
+  step "Rebuilding virtual environment..."
+  rm -rf "$VENV" || fail "Could not remove broken virtual environment"
+fi
+
 if [ ! -d "$VENV" ]; then
   step "Creating virtual environment..."
   python3 -m venv "$VENV" || fail "Could not create virtual environment"
@@ -37,7 +49,7 @@ fi
 
 # ── 3. Dependencies ────────────────────────────────────
 step "Installing dependencies..."
-PIP_OUTPUT=$("$VENV/bin/pip" install -r requirements.txt \
+PIP_OUTPUT=$("$VENV/bin/python" -m pip install -r requirements.txt \
   --quiet \
   --disable-pip-version-check \
   2>&1)

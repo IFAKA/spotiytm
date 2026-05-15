@@ -42,7 +42,7 @@ call .venv\Scripts\activate.bat
 
 :: ── Step 2: Dependencies ──────────────────────────────────────────────────
 echo   Step 2/3: Installing tools (first time: ~2 min)...
-pip install -r requirements.txt --quiet
+python -m pip install -r requirements.txt --quiet
 
 :: ── Step 3: Launch ────────────────────────────────────────────────────────
 echo   Step 3/3: Starting app -- your browser will open automatically
