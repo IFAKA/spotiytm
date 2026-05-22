@@ -3,9 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Spotify → YouTube Music</title>
+  <title>Spotify -> YouTube Music</title>
 
-  <!-- Tailwind CSS (CDN, no build step) -->
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = {
@@ -13,353 +12,464 @@
         extend: {
           colors: {
             spotify: '#1DB954',
-            ytred: '#FF0000',
+            ytred: '#FF0033',
+            ink: '#111312',
+            panel: '#171a18',
           },
           animation: {
-            'fade-in': 'fadeIn 0.3s ease-out',
-            'slide-up': 'slideUp 0.4s ease-out',
-            'pulse-slow': 'pulse 2s cubic-bezier(0.4,0,0.6,1) infinite',
+            'spin-slow': 'spin 1s linear infinite',
+            'soft-pulse': 'softPulse 1.8s cubic-bezier(.4,0,.2,1) infinite',
           },
           keyframes: {
-            fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-            slideUp: { '0%': { opacity: '0', transform: 'translateY(12px)' }, '100%': { opacity: '1', transform: 'translateY(0)' } },
+            softPulse: {
+              '0%, 100%': { opacity: '.55' },
+              '50%': { opacity: '1' },
+            },
           },
         }
       }
     }
   </script>
 
-  <!-- Alpine.js (CDN) -->
+  <script defer src="https://cdn.jsdelivr.net/npm/@alpinejs/collapse@3.x.x/dist/cdn.min.js"></script>
   <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
 
   <style>
-    [x-cloak] { display: none !important; }
-
-    .progress-bar {
-      transition: width 0.3s ease;
+    :root {
+      --ease-out: cubic-bezier(.22, 1, .36, 1);
+      --ease-snap: cubic-bezier(.2, .8, .2, 1);
+      --dur-fast: 140ms;
+      --dur-med: 220ms;
+      --ring: 0 0 0 3px rgba(29, 185, 84, .18);
     }
 
-    /* Custom scrollbar */
+    [x-cloak] { display: none !important; }
+
+    body {
+      background:
+        radial-gradient(circle at top left, rgba(29, 185, 84, .12), transparent 32rem),
+        radial-gradient(circle at bottom right, rgba(255, 0, 51, .10), transparent 34rem),
+        #0c0e0d;
+      overflow: hidden;
+    }
+
+    .console-shell {
+      box-shadow:
+        0 24px 80px rgba(0, 0, 0, .38),
+        inset 0 1px 0 rgba(255, 255, 255, .04);
+    }
+
+    .pressable {
+      transform: translateY(0) scale(1);
+      transition:
+        background-color var(--dur-fast) var(--ease-out),
+        border-color var(--dur-fast) var(--ease-out),
+        color var(--dur-fast) var(--ease-out),
+        opacity var(--dur-fast) var(--ease-out),
+        box-shadow var(--dur-fast) var(--ease-out),
+        transform var(--dur-fast) var(--ease-snap);
+    }
+
+    .pressable:hover:not(:disabled) { transform: translateY(-1px); }
+    .pressable:active:not(:disabled) { transform: translateY(0) scale(.985); }
+    .focusable:focus-visible { outline: none; box-shadow: var(--ring); }
+
+    .progress-bar {
+      transition: width var(--dur-med) var(--ease-out);
+    }
+
+    .morph {
+      transition:
+        max-height var(--dur-med) var(--ease-out),
+        opacity var(--dur-med) var(--ease-out),
+        transform var(--dur-med) var(--ease-out);
+    }
+
+    .track-list {
+      max-height: min(16rem, 38vh);
+      scroll-behavior: smooth;
+    }
     .track-list::-webkit-scrollbar { width: 4px; }
     .track-list::-webkit-scrollbar-track { background: transparent; }
-    .track-list::-webkit-scrollbar-thumb { background: #374151; border-radius: 2px; }
+    .track-list::-webkit-scrollbar-thumb { background: #3f4642; border-radius: 999px; }
 
-    /* Blinking cursor for searching state */
-    @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:0.3 } }
-    .blink { animation: blink 1.2s ease-in-out infinite; }
+    @keyframes blink { 0%,100% { opacity:1 } 50% { opacity:.32 } }
+    .blink { animation: blink 1.2s var(--ease-out) infinite; }
+
+    @keyframes queueItemIn {
+      from {
+        opacity: 0;
+        transform: translateY(6px) scale(.992);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+      }
+    }
+
+    .queue-card {
+      animation: queueItemIn 220ms var(--ease-out) both;
+    }
+
+    @keyframes trackRowIn {
+      from {
+        opacity: 0;
+        transform: translateY(5px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .track-row {
+      animation: trackRowIn 180ms var(--ease-out) both;
+      transform-origin: top;
+      transition:
+        background-color var(--dur-fast) var(--ease-out),
+        transform var(--dur-med) var(--ease-out),
+        opacity var(--dur-med) var(--ease-out);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        scroll-behavior: auto !important;
+        transition-duration: .01ms !important;
+      }
+    }
   </style>
 </head>
 
-<body class="h-full bg-gray-950 text-gray-100 font-sans antialiased">
-
+<body class="h-full text-stone-100 antialiased">
 <div
   id="app"
   x-data="spotifyConverter()"
   x-init="init()"
-  class="min-h-full flex flex-col items-center px-4 py-12"
+  class="flex h-full overflow-hidden px-3 py-4 sm:px-6 sm:py-6"
 >
-
-  <!-- ──────────────────── HEADER ──────────────────── -->
-  <header class="mb-10 text-center animate-fade-in">
-    <div class="flex items-center justify-center gap-3 mb-2">
-      <!-- Spotify icon -->
-      <svg class="w-8 h-8 text-spotify" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
-      </svg>
-      <span class="text-2xl text-gray-500">→</span>
-      <!-- YouTube Music icon -->
-      <svg class="w-8 h-8 text-ytred" viewBox="0 0 24 24" fill="currentColor">
-        <path d="M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.864 15.024V8.976L15.84 12l-5.976 3.024z"/>
-      </svg>
-    </div>
-    <h1 class="text-3xl font-bold tracking-tight text-white">Spotify → YouTube Music</h1>
-    <p class="text-gray-400 mt-1">Convert any public playlist in seconds</p>
-  </header>
-
-  <!-- ──────────────────── AUTH BANNER ──────────────────── -->
-  <div
-    x-show="!connected && !checkingAuth"
-    x-cloak
-    class="w-full max-w-md mb-8 animate-slide-up"
-  >
-    <div class="bg-gray-900 border border-gray-700 rounded-2xl shadow-2xl overflow-hidden">
-
-      <!-- Connecting / waiting state (shown while auto-connecting on load) -->
-      <div x-show="!authError" class="px-8 py-10 text-center">
-        <div class="relative w-16 h-16 mx-auto mb-6">
-          <svg class="w-16 h-16 text-ytred/20" fill="none" viewBox="0 0 24 24">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="2"/>
-          </svg>
-          <svg class="w-16 h-16 animate-spin text-ytred absolute inset-0" style="animation-duration:1.2s" fill="none" viewBox="0 0 24 24">
-            <path stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 2a10 10 0 019.5 6.8"/>
-          </svg>
-          <div class="absolute inset-0 flex items-center justify-center">
-            <svg class="w-6 h-6 text-ytred" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.864 15.024V8.976L15.84 12l-5.976 3.024z"/>
-            </svg>
-          </div>
-        </div>
-        <h2 class="text-white font-semibold text-lg mb-2" x-text="authStatus || 'Connecting to YouTube Music…'"></h2>
-        <!-- Blue sign-in panel: shown when Playwright window is open -->
-        <div x-show="authNeedsSignIn" class="mt-3 px-4 py-3 bg-blue-950/60 border border-blue-700/50 rounded-xl text-left">
-          <p class="text-blue-300 text-sm font-medium mb-1">A sign-in window just opened</p>
-          <p class="text-blue-400/80 text-sm">Please sign in to your Google account in that window. This app will connect automatically once you're signed in.</p>
-        </div>
-        <!-- Default hint: shown while reading cookies -->
-        <p x-show="!authNeedsSignIn" class="text-gray-500 text-sm">
-          Reading your browser's YouTube cookies…
-        </p>
-        <button
-          @click="cancelAuth()"
-          class="mt-6 text-gray-700 hover:text-gray-400 text-xs underline transition-colors"
-        >Cancel</button>
-      </div>
-
-      <!-- Error state: auto-connect failed -->
-      <div x-show="authError" class="px-8 py-10 text-center">
-        <div class="w-12 h-12 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
-          <svg class="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z"/>
-          </svg>
-        </div>
-        <h2 class="text-white font-semibold mb-1">Connection failed</h2>
-        <p class="text-red-400 text-sm mb-6" x-text="authError"></p>
-        <button
-          @click="startAuth()"
-          class="w-full flex items-center justify-center gap-2 bg-ytred hover:bg-red-600 text-white font-semibold py-3 rounded-xl transition-all duration-200"
-        >Try again</button>
-        <p class="text-gray-700 text-xs mt-4">Credentials stay on this device only</p>
-      </div>
-
-    </div>
-  </div>
-
-  <!-- ──────────────────── AUTH CHECKING SPINNER ──────────────────── -->
-  <div x-show="checkingAuth" x-cloak class="mb-8">
-    <svg class="w-8 h-8 animate-spin text-gray-600" fill="none" viewBox="0 0 24 24">
-      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"/>
-      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-    </svg>
-  </div>
-
-  <!-- ──────────────────── MAIN CONVERTER ──────────────────── -->
-  <div
-    x-show="connected"
-    x-cloak
-    class="w-full max-w-2xl animate-slide-up"
-    x-data
-  >
-
-    <!-- Input card -->
-    <div class="bg-gray-900 border border-gray-800 rounded-2xl p-6 shadow-xl mb-4">
-      <label class="block text-sm font-medium text-gray-400 mb-2">Spotify Playlist URL</label>
-      <div class="flex gap-3">
-        <input
-          x-model="spotifyUrl"
-          @keydown.enter="submit()"
-          @input="clipboardSuggestions = []"
-          type="url"
-          placeholder="https://open.spotify.com/playlist/..."
-          class="flex-1 bg-gray-800 border border-gray-700 rounded-xl px-4 py-3 text-white placeholder-gray-600 focus:outline-none focus:ring-2 focus:ring-spotify/50 focus:border-spotify/50 transition-all duration-200"
-        />
-        <button
-          @click="submit()"
-          :disabled="!spotifyUrl.trim()"
-          class="bg-spotify hover:bg-green-500 disabled:opacity-40 disabled:cursor-not-allowed text-black font-bold px-6 py-3 rounded-xl transition-all duration-200 whitespace-nowrap"
-        >Add to queue</button>
-      </div>
-      <p x-show="inputError" x-text="inputError" class="text-red-400 text-xs mt-2"></p>
-
-      <!-- Multiple playlist URLs found in clipboard -->
-      <div x-show="clipboardSuggestions.length > 0" x-cloak class="mt-3">
-        <div class="flex items-center justify-between mb-2">
-          <p class="text-xs text-gray-500">Found <span x-text="clipboardSuggestions.length"></span> playlists in your clipboard</p>
-          <button
-            @click="addAllSuggestions()"
-            class="text-xs text-spotify hover:underline font-medium"
-          >Add all to queue</button>
-        </div>
-        <div class="space-y-1">
-          <template x-for="(url, i) in clipboardSuggestions" :key="i">
+  <main class="mx-auto flex h-full min-h-0 w-full max-w-3xl flex-col justify-center">
+    <section class="console-shell flex max-h-full min-h-0 flex-col overflow-hidden rounded-2xl border border-white/10 bg-panel/95">
+      <header class="border-b border-white/10 px-4 py-4 sm:px-5">
+        <div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div class="min-w-0">
             <div class="flex items-center gap-2">
-              <button
-                @click="spotifyUrl = url; clipboardSuggestions = []"
-                class="flex-1 text-left text-xs bg-gray-800 hover:bg-gray-700 border border-gray-700 rounded-lg px-3 py-2 text-gray-400 hover:text-white transition-all font-mono truncate"
-                x-text="url"
-              ></button>
-              <button
-                @click="clipboardSuggestions.splice(i, 1); _enqueue(url)"
-                class="flex-shrink-0 text-xs text-gray-600 hover:text-spotify transition-colors px-2 py-2"
-                title="Add to queue"
-              >+</button>
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-black/30">
+                <svg class="h-4 w-4 text-spotify" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 0C5.4 0 0 5.4 0 12s5.4 12 12 12 12-5.4 12-12S18.66 0 12 0zm5.521 17.34c-.24.359-.66.48-1.021.24-2.82-1.74-6.36-2.101-10.561-1.141-.418.122-.779-.179-.899-.539-.12-.421.18-.78.54-.9 4.56-1.021 8.52-.6 11.64 1.32.42.18.479.659.301 1.02zm1.44-3.3c-.301.42-.841.6-1.262.3-3.239-1.98-8.159-2.58-11.939-1.38-.479.12-1.02-.12-1.14-.6-.12-.48.12-1.021.6-1.141C9.6 9.9 15 10.561 18.72 12.84c.361.181.54.78.241 1.2zm.12-3.36C15.24 8.4 8.82 8.16 5.16 9.301c-.6.179-1.2-.181-1.38-.721-.18-.601.18-1.2.72-1.381 4.26-1.26 11.28-1.02 15.721 1.621.539.3.719 1.02.419 1.56-.299.421-1.02.599-1.559.3z"/>
+                </svg>
+              </div>
+              <span class="text-stone-600">-></span>
+              <div class="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-black/30">
+                <svg class="h-4 w-4 text-ytred" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                  <path d="M12 0C5.376 0 0 5.376 0 12s5.376 12 12 12 12-5.376 12-12S18.624 0 12 0zm0 19.104c-3.924 0-7.104-3.18-7.104-7.104S8.076 4.896 12 4.896s7.104 3.18 7.104 7.104-3.18 7.104-7.104 7.104zm0-13.332c-3.432 0-6.228 2.796-6.228 6.228S8.568 18.228 12 18.228s6.228-2.796 6.228-6.228S15.432 5.772 12 5.772zM9.864 15.024V8.976L15.84 12l-5.976 3.024z"/>
+                </svg>
+              </div>
+              <h1 class="truncate text-base font-semibold tracking-tight text-white sm:text-lg">Spotify to YouTube Music</h1>
             </div>
-          </template>
-        </div>
-      </div>
-    </div>
-
-    <!-- Queue -->
-    <div x-show="queueHasItems" x-cloak class="space-y-3">
-      <template x-for="item in queue" :key="item.id">
-        <div
-          class="bg-gray-900 border rounded-2xl overflow-hidden transition-all duration-300"
-          :class="{
-            'border-gray-800':           item.status === 'pending',
-            'border-spotify/40':         item.status === 'active',
-            'border-gray-800':           item.status === 'done',
-            'border-red-900/50':         item.status === 'error',
-          }"
-        >
-          <!-- ── Pending ── -->
-          <div x-show="item.status === 'pending'" class="flex items-center gap-3 px-5 py-4">
-            <span class="text-gray-600 text-lg">◌</span>
-            <span class="flex-1 text-gray-500 text-sm font-mono truncate" x-text="shortUrl(item.url)"></span>
-            <button @click="removeItem(item.id)" class="text-gray-700 hover:text-red-400 text-xs transition-colors">Remove</button>
+            <p class="mt-1 text-xs text-stone-500">Local converter. Spotify URLs in, YouTube Music playlists out.</p>
           </div>
 
-          <!-- ── Active ── -->
-          <div x-show="item.status === 'active'" class="p-5">
-            <div class="flex items-start justify-between mb-3">
-              <div>
-                <p class="text-white font-semibold" x-text="item.name || shortUrl(item.url)"></p>
-                <p class="text-gray-500 text-xs mt-0.5" x-text="item.total ? `${item.found + item.missing} / ${item.total} tracks` : 'Fetching…'"></p>
-              </div>
-              <span class="text-xs text-gray-500 flex items-center gap-1 mt-0.5">
-                <span class="blink">●</span> Converting
-              </span>
-            </div>
-            <!-- Progress bar -->
-            <div class="bg-gray-800 rounded-full h-1.5 mb-4 overflow-hidden">
-              <div class="progress-bar bg-spotify h-1.5 rounded-full" :style="`width: ${progress}%`"></div>
-            </div>
-            <!-- Track list -->
-            <div
-              class="track-list max-h-52 overflow-y-auto space-y-0.5 pr-1"
-              :data-tracks="item.id"
+          <div class="flex items-center gap-2">
+            <span
+              class="inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium"
+              :class="{
+                'border-stone-700 bg-black/20 text-stone-400': checkingAuth || (!connected && !checkingAuth && !authLoading && !authError),
+                'border-amber-400/30 bg-amber-400/10 text-amber-200': authLoading,
+                'border-red-400/30 bg-red-500/10 text-red-300': authError && !authLoading,
+                'border-spotify/30 bg-spotify/10 text-green-200': canConvert,
+              }"
             >
-              <template x-for="(t, idx) in item.tracks" :key="idx">
-                <div class="flex items-center gap-2.5 px-2 py-1.5 rounded-lg text-sm"
-                  :class="{ 'bg-green-950/20': t.status==='found', 'bg-red-950/20': t.status==='missing' }"
-                >
-                  <span :class="t.status==='found' ? 'text-spotify' : 'text-red-400'" class="flex-shrink-0 w-4 text-center text-xs">
-                    <template x-if="t.status==='found'">✓</template>
-                    <template x-if="t.status==='missing'">✗</template>
-                  </span>
-                  <span class="flex-1 min-w-0">
-                    <span class="text-white truncate block" x-text="t.name"></span>
-                    <span class="text-gray-500 text-xs truncate block" x-text="t.artists"></span>
-                  </span>
-                  <template x-if="t.status==='missing'">
-                    <a :href="`https://music.youtube.com/search?q=${encodeURIComponent(t.artists+' '+t.name)}`"
-                       target="_blank" class="text-gray-600 hover:text-white text-xs underline flex-shrink-0">search</a>
-                  </template>
+              <span class="h-1.5 w-1.5 rounded-full" :class="canConvert ? 'bg-spotify' : authError ? 'bg-red-400' : authLoading ? 'bg-amber-300 animate-soft-pulse' : 'bg-stone-500'"></span>
+              <span x-text="canConvert ? 'Connected' : checkingAuth ? 'Checking' : authLoading ? 'Connecting' : authError ? 'Reconnect' : 'Not connected'"></span>
+            </span>
+            <span class="hidden text-xs text-stone-600 sm:inline">credentials stay on this device</span>
+          </div>
+        </div>
+      </header>
+
+      <div class="min-h-0 space-y-4 overflow-hidden p-4 sm:p-5">
+        <section class="rounded-xl border border-white/10 bg-black/20 p-3 sm:p-4">
+          <div class="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <p class="text-sm font-semibold text-white" x-text="queueHasItems ? 'Queue' : canConvert ? 'Add a Spotify playlist' : authStepTitle"></p>
+              <p class="text-xs text-stone-500" x-text="queueHasItems ? `${pendingCount} waiting${activeItem ? ' · converting now' : ''}` : canConvert ? 'Paste a message or links; only Spotify playlists are queued.' : authStepBody"></p>
+            </div>
+            <button
+              x-show="authLoading"
+              type="button"
+              @click="cancelAuth()"
+              class="pressable focusable self-start rounded-lg border border-white/10 px-2.5 py-1.5 text-xs font-medium text-stone-400 hover:border-stone-500 hover:text-white sm:self-auto"
+            >Cancel</button>
+          </div>
+
+          <div x-show="!queueHasItems || !canConvert" x-collapse.duration.220ms class="grid gap-2 sm:grid-cols-[1fr_auto]">
+            <input
+              x-model="spotifyUrl"
+              @keydown.enter="submit()"
+              @input="clipboardSuggestions = []; inputError = ''"
+              type="text"
+              placeholder="Paste Spotify playlist links, or a message containing them..."
+              :disabled="!canConvert"
+              class="focusable min-h-11 w-full rounded-xl border border-white/10 bg-stone-950/80 px-3 py-2.5 text-sm text-white placeholder-stone-600 disabled:cursor-not-allowed disabled:opacity-50"
+            />
+
+            <button
+              @click="canConvert ? submit() : startAuth()"
+              :disabled="checkingAuth || authLoading || (canConvert && !canSubmitUrl)"
+              class="pressable focusable inline-flex min-h-11 items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold disabled:cursor-not-allowed disabled:opacity-45"
+              :class="canConvert ? 'bg-spotify text-black hover:bg-green-400' : 'bg-ytred text-white hover:bg-red-500'"
+            >
+              <svg x-show="checkingAuth || authLoading" class="h-4 w-4 animate-spin-slow" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" opacity=".2"></circle>
+                <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path>
+              </svg>
+              <span x-show="!canConvert && !authError">Connect YouTube Music</span>
+              <span x-show="!canConvert && authError">Reconnect YouTube Music</span>
+              <span x-show="canConvert">Add to queue</span>
+            </button>
+          </div>
+
+          <p x-show="inputError || urlInputError" x-cloak x-text="inputError || urlInputError" class="mt-2 text-xs text-red-300"></p>
+
+          <div x-show="authNeedsSignIn && authLoading" x-cloak class="morph mt-3 rounded-xl border border-blue-400/20 bg-blue-500/10 p-3 text-sm text-blue-200">
+            A sign-in window opened. Finish Google sign-in there, then this console will unlock automatically.
+          </div>
+
+          <div x-show="authError && !authLoading" x-cloak class="morph mt-3 rounded-xl border border-red-400/20 bg-red-500/10 p-3">
+            <p class="text-sm font-medium text-red-200">Connection failed</p>
+            <p class="mt-1 break-words text-xs text-red-200/75" x-text="authError"></p>
+            <details class="mt-2 text-xs text-stone-400">
+              <summary class="cursor-pointer text-stone-300">Manual recovery</summary>
+              <ol class="mt-2 list-decimal space-y-1 pl-4">
+                <li>Open Chrome or Brave on this computer.</li>
+                <li>Go to music.youtube.com and sign in.</li>
+                <li>Wait until your YouTube Music library loads.</li>
+                <li>Return here and reconnect.</li>
+              </ol>
+            </details>
+          </div>
+
+          <div x-show="clipboardSuggestions.length > 0" x-cloak class="morph mt-3 rounded-xl border border-white/10 bg-stone-950/55 p-3">
+            <div class="mb-2 flex items-center justify-between gap-3">
+              <p class="text-xs text-stone-500">Clipboard: <span x-text="clipboardSuggestions.length"></span> Spotify playlist URLs</p>
+              <button @click="addAllSuggestions()" class="pressable focusable rounded-md px-2 py-1 text-xs font-semibold text-spotify hover:bg-spotify/10">Add all</button>
+            </div>
+            <div class="space-y-1">
+              <template x-for="(url, i) in clipboardSuggestions" :key="url">
+                <div class="grid grid-cols-[1fr_auto] gap-2">
+                  <button
+                    @click="spotifyUrl = url; clipboardSuggestions = []"
+                    class="pressable focusable min-w-0 truncate rounded-lg border border-white/10 bg-black/20 px-2.5 py-2 text-left font-mono text-xs text-stone-400 hover:border-stone-600 hover:text-white"
+                    x-text="url"
+                  ></button>
+                  <button
+                    @click="clipboardSuggestions.splice(i, 1); _enqueue(url)"
+                    class="pressable focusable rounded-lg border border-white/10 px-2.5 py-2 text-xs font-bold text-stone-400 hover:border-spotify/40 hover:text-spotify"
+                    title="Add to queue"
+                  >Add</button>
                 </div>
               </template>
             </div>
-            <!-- Stats -->
-            <div class="flex gap-4 text-xs border-t border-gray-800 mt-3 pt-3">
-              <span class="text-spotify">✓ <span x-text="item.found"></span> found</span>
-              <span class="text-red-400">✗ <span x-text="item.missing"></span> not found</span>
-            </div>
           </div>
-
-          <!-- ── Done ── -->
-          <div x-show="item.status === 'done'" class="flex items-center gap-4 px-5 py-4">
-            <span class="text-spotify text-xl flex-shrink-0">✓</span>
-            <div class="flex-1 min-w-0">
-              <p class="text-white text-sm font-medium truncate" x-text="item.name || shortUrl(item.url)"></p>
-              <p class="text-gray-500 text-xs">
-                <span x-text="item.found"></span> added
-                <template x-if="item.missing > 0">
-                  <span> · <span x-text="item.missing"></span> not found</span>
-                </template>
-              </p>
-            </div>
-            <a
-              x-show="item.playlistId"
-              :href="`https://music.youtube.com/playlist?list=${item.playlistId}`"
-              target="_blank"
-              class="flex-shrink-0 text-xs bg-ytred hover:bg-red-600 text-white font-semibold px-3 py-1.5 rounded-lg transition-all"
-            >Open →</a>
-          </div>
-
-          <!-- ── Error ── -->
-          <div x-show="item.status === 'error'" class="flex items-start gap-4 px-5 py-4">
-            <span class="text-red-400 text-xl flex-shrink-0 mt-0.5">✗</span>
-            <div class="flex-1 min-w-0">
-              <p class="text-white text-sm font-medium truncate" x-text="item.name || shortUrl(item.url)"></p>
-              <p class="text-red-400 text-xs break-words mt-0.5" x-text="item.error"></p>
-            </div>
-            <button
-              @click="retryItem(item.id)"
-              class="flex-shrink-0 text-xs text-gray-400 hover:text-white border border-gray-700 hover:border-gray-500 px-3 py-1.5 rounded-lg transition-all"
-            >Retry</button>
-          </div>
-
-          <!-- ── Debug panel (active / done / error) ── -->
-          <div x-show="item.status !== 'pending'" class="border-t border-gray-800/60">
-            <!-- Toggle bar -->
-            <button
-              @click="item.showDebug = !item.showDebug"
-              class="w-full flex items-center justify-between px-5 py-2 text-xs text-gray-700 hover:text-gray-400 transition-colors"
-            >
-              <span>
-                Debug log
-                <span x-show="item.logs.length > 0" class="ml-1 text-gray-600">(<span x-text="item.logs.length"></span>)</span>
-              </span>
-              <span x-text="item.showDebug ? '▲' : '▼'" class="text-gray-700"></span>
-            </button>
-
-            <!-- Panel body -->
-            <div x-show="item.showDebug" x-cloak class="px-5 pb-5 space-y-3">
-
-              <!-- Full error (if errored) -->
-              <div x-show="item.error" class="p-3 bg-red-950/40 rounded-lg border border-red-900/40">
-                <p class="text-red-400 text-xs font-mono whitespace-pre-wrap break-all leading-relaxed" x-text="item.error"></p>
-              </div>
-
-              <!-- Log entries -->
+          <div x-show="queueHasItems" x-collapse.duration.220ms x-cloak class="space-y-2">
+            <template x-for="item in queue" :key="item.id">
+              <article
+                class="queue-card overflow-hidden rounded-xl border bg-black/20"
+                :class="{
+                  'border-white/10': item.status === 'pending' || item.status === 'done',
+                  'border-spotify/40': item.status === 'active',
+                  'border-red-400/30': item.status === 'error',
+                }"
+              >
               <div
-                x-show="item.logs.length > 0"
-                class="max-h-44 overflow-y-auto space-y-1 font-mono text-xs"
+                x-show="item.status === 'pending'"
+                x-collapse.duration.180ms
+                x-transition.opacity.duration.180ms
+                class="flex items-center gap-2 px-3 py-2.5"
               >
-                <template x-for="(entry, i) in item.logs" :key="i">
-                  <div class="flex gap-2">
-                    <span class="text-gray-700 flex-shrink-0 select-none" x-text="entry.time"></span>
-                    <span class="text-gray-500 break-words min-w-0" x-text="entry.message"></span>
-                  </div>
-                </template>
+                <span class="h-2 w-2 rounded-full border border-stone-500"></span>
+                <span class="min-w-0 flex-1 truncate font-mono text-xs text-stone-400" x-text="shortUrl(item.url)"></span>
+                <span class="rounded-md bg-spotify/10 px-1.5 py-0.5 text-[11px] font-bold text-green-200">Convert</span>
+                <button @click="removeItem(item.id)" class="pressable focusable rounded-md px-2 py-1 text-xs text-stone-500 hover:bg-red-500/10 hover:text-red-300">Remove</button>
               </div>
 
-              <p x-show="item.logs.length === 0" class="text-gray-700 text-xs font-mono">No events yet.</p>
-
-              <!-- Copy button -->
-              <button
-                @click="copyDebugLog(item)"
-                class="flex items-center gap-1.5 text-xs text-gray-500 hover:text-white border border-gray-800 hover:border-gray-600 px-3 py-1.5 rounded-lg transition-all"
+              <div
+                x-show="item.status === 'active'"
+                x-collapse.duration.220ms
+                x-transition.opacity.duration.220ms
+                class="p-3 sm:p-4"
               >
-                <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                  <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
-                </svg>
-                Copy for AI
-              </button>
-            </div>
+                <div class="mb-3 flex items-start justify-between gap-3">
+                  <div class="min-w-0">
+                    <div class="flex items-center gap-2">
+                      <span class="blink h-2 w-2 rounded-full bg-spotify"></span>
+                      <p class="truncate text-sm font-semibold text-white" x-text="item.name || shortUrl(item.url)"></p>
+                      <span class="rounded-md bg-spotify/10 px-1.5 py-0.5 text-[11px] font-bold text-green-200">Convert</span>
+                    </div>
+                    <p class="mt-1 text-xs text-stone-500">
+                      <span>Converting</span>
+                      <span> · </span>
+                      <span x-text="item.total ? `${item.found + item.missing} / ${item.total} tracks` : 'fetching tracks'"></span>
+                    </p>
+                  </div>
+                  <span class="shrink-0 text-xs font-semibold text-stone-400" x-text="`${itemProgress(item)}%`"></span>
+                </div>
+
+                <div class="mb-3 h-2 overflow-hidden rounded-full bg-stone-800">
+                  <div class="progress-bar h-2 rounded-full bg-spotify" :style="`width: ${itemProgress(item)}%`"></div>
+                </div>
+
+                <div class="mb-3 grid grid-cols-3 gap-2 text-xs">
+                  <div class="rounded-lg bg-spotify/10 px-2 py-1.5 text-green-200"><span class="font-bold" x-text="item.found"></span> found</div>
+                  <div class="rounded-lg bg-red-500/10 px-2 py-1.5 text-red-200"><span class="font-bold" x-text="item.missing"></span> missing</div>
+                  <div class="rounded-lg bg-white/5 px-2 py-1.5 text-stone-300"><span class="font-bold" x-text="leftCount(item)"></span> left</div>
+                </div>
+
+              </div>
+
+              <div
+                x-show="item.status === 'done'"
+                x-collapse.duration.220ms
+                x-transition:enter="transition duration-200 ease-out"
+                x-transition:enter-start="opacity-0 translate-y-1 scale-[.99]"
+                x-transition:enter-end="opacity-100 translate-y-0 scale-100"
+                x-transition:leave="transition duration-150 ease-in"
+                x-transition:leave-start="opacity-100 translate-y-0 scale-100"
+                x-transition:leave-end="opacity-0 -translate-y-1 scale-[.99]"
+                class="grid grid-cols-[auto_1fr_auto] items-center gap-3 px-3 py-2.5"
+              >
+                <span class="h-2 w-2 rounded-full bg-spotify"></span>
+                <div class="min-w-0">
+                  <div class="flex min-w-0 items-center gap-2">
+                    <p class="truncate text-sm font-medium text-white" x-text="item.name || shortUrl(item.url)"></p>
+                    <span class="shrink-0 rounded-md bg-spotify/10 px-1.5 py-0.5 text-[11px] font-bold text-green-200">Done</span>
+                  </div>
+                  <p class="truncate text-xs text-stone-500">
+                    <span x-text="item.found"></span>
+                    <span> added</span>
+                    <span x-show="item.missing > 0"> · <span x-text="item.missing"></span> not found</span>
+                  </p>
+                </div>
+                <a
+                  x-show="item.playlistId"
+                  :href="`https://music.youtube.com/playlist?list=${item.playlistId}`"
+                  target="_blank"
+                  class="pressable focusable rounded-lg bg-ytred px-3 py-1.5 text-xs font-bold text-white hover:bg-red-500"
+                >Open</a>
+              </div>
+
+              <div
+                x-show="item.status === 'error'"
+                x-collapse.duration.220ms
+                x-transition.opacity.duration.220ms
+                class="p-3"
+              >
+                <div class="flex items-start gap-3">
+                  <span class="mt-1 h-2 w-2 shrink-0 rounded-full bg-red-400"></span>
+                  <div class="min-w-0 flex-1">
+                    <p class="truncate text-sm font-medium text-white" x-text="item.name || shortUrl(item.url)"></p>
+                    <p class="mt-1 break-words text-xs text-red-300" x-text="item.error"></p>
+                  </div>
+                  <button @click="retryItem(item.id)" class="pressable focusable shrink-0 rounded-lg border border-white/10 px-3 py-1.5 text-xs font-semibold text-stone-300 hover:border-red-300/40 hover:text-white">Retry</button>
+                </div>
+              </div>
+
+              <div
+                x-show="item.status !== 'pending' && item.tracks.length > 0"
+                x-collapse.duration.220ms
+                x-transition.opacity.duration.220ms
+                class="border-t border-white/10 px-3 py-3 sm:px-4"
+              >
+                <div class="mb-2 flex items-center justify-between gap-3">
+                  <p class="text-xs font-semibold text-stone-300">Tracks</p>
+                  <p class="text-xs text-stone-600"><span x-text="item.tracks.length"></span> shown</p>
+                </div>
+                <div class="track-list space-y-1 overflow-y-auto pr-1" :data-tracks="item.id">
+                  <template x-for="(t, trackIndex) in item.tracks" :key="t.id || `${item.id}-${trackIndex}-${t.status}-${t.name}`">
+                    <div class="track-row grid grid-cols-[auto_1fr_auto] items-center gap-2 rounded-lg px-2 py-1.5 text-sm" :class="t.status === 'found' ? 'bg-spotify/10' : 'bg-red-500/10'">
+                      <span class="text-xs font-bold" :class="t.status === 'found' ? 'text-spotify' : 'text-red-300'" x-text="t.status === 'found' ? 'OK' : 'MISS'"></span>
+                      <span class="min-w-0">
+                        <span class="block truncate text-xs text-white" x-text="t.name"></span>
+                        <span class="block truncate text-[11px] text-stone-500" x-text="t.artists"></span>
+                      </span>
+                      <a
+                        x-show="t.status === 'missing'"
+                        :href="`https://music.youtube.com/search?q=${encodeURIComponent(t.artists + ' ' + t.name)}`"
+                        target="_blank"
+                        class="pressable focusable rounded-md px-2 py-1 text-xs text-stone-400 hover:bg-white/5 hover:text-white"
+                      >Search</a>
+                    </div>
+                  </template>
+                </div>
+              </div>
+
+              <div
+                x-show="item.status !== 'pending'"
+                x-collapse.duration.180ms
+                x-transition.opacity.duration.180ms
+                class="border-t border-white/10"
+              >
+                <button
+                  @click="item.showDebug = !item.showDebug"
+                  class="pressable focusable flex w-full items-center justify-between px-3 py-2 text-xs text-stone-600 hover:text-stone-300"
+                >
+                  <span>Debug log <span x-show="item.logs.length > 0">(<span x-text="item.logs.length"></span>)</span></span>
+                  <span x-text="item.showDebug ? 'Hide' : 'Show'"></span>
+                </button>
+
+                <div x-show="item.showDebug" x-collapse.duration.220ms x-cloak class="morph space-y-3 px-3 pb-3">
+                  <div x-show="item.error" class="rounded-lg border border-red-400/20 bg-red-500/10 p-3">
+                    <p class="whitespace-pre-wrap break-all font-mono text-xs leading-relaxed text-red-200" x-text="item.error"></p>
+                  </div>
+
+                  <div x-show="item.logs.length > 0" class="max-h-44 space-y-1 overflow-y-auto font-mono text-xs">
+                    <template x-for="(entry, i) in item.logs" :key="i">
+                      <div class="grid grid-cols-[4.5rem_1fr] gap-2">
+                        <span class="select-none text-stone-700" x-text="entry.time"></span>
+                        <span class="min-w-0 break-words text-stone-500" x-text="entry.message"></span>
+                      </div>
+                    </template>
+                  </div>
+
+                  <p x-show="item.logs.length === 0" class="font-mono text-xs text-stone-700">No events yet.</p>
+
+                  <button
+                    @click="copyDebugLog(item)"
+                    class="pressable focusable rounded-lg border border-white/10 px-3 py-1.5 text-xs font-medium text-stone-400 hover:border-stone-600 hover:text-white"
+                  >Copy debug log</button>
+                </div>
+              </div>
+              </article>
+            </template>
           </div>
 
-        </div>
-      </template>
-    </div>
-  </div>
+          <div x-show="queueHasItems && canConvert" x-collapse.duration.180ms class="mt-3 grid gap-2 border-t border-white/10 pt-3 sm:grid-cols-[1fr_auto]">
+            <input
+              x-model="spotifyUrl"
+              @keydown.enter="submit()"
+              @input="clipboardSuggestions = []; inputError = ''"
+              type="text"
+              placeholder="Add another Spotify playlist..."
+              class="focusable min-h-10 w-full rounded-lg border border-white/10 bg-stone-950/80 px-3 py-2 text-sm text-white placeholder-stone-600"
+            />
+            <button
+              @click="submit()"
+              :disabled="!canSubmitUrl"
+              class="pressable focusable inline-flex min-h-10 items-center justify-center rounded-lg bg-white/10 px-3 py-2 text-sm font-semibold text-stone-200 hover:bg-white/15 disabled:cursor-not-allowed disabled:opacity-45"
+            >Add</button>
+          </div>
+        </section>
+      </div>
+    </section>
 
-  <!-- Footer -->
-  <footer class="mt-12 text-center text-gray-700 text-xs">
-    Runs locally on your machine — no data leaves your computer
-  </footer>
-
+    <footer class="px-2 py-4 text-center text-xs text-stone-700">
+      Runs locally on your machine. No Spotify login required.
+    </footer>
+  </main>
 </div>
 
-<!-- App logic -->
 <script src="/static/app.js"></script>
-
 </body>
 </html>

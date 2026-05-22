@@ -14,6 +14,7 @@ function spotifyConverter() {
     authError: '',
     authStatus: '',
     authNeedsSignIn: false,
+    authTimedOut: false,
     _authPollTimer: null,
 
     // --- Input ---
@@ -27,6 +28,7 @@ function spotifyConverter() {
     queue: [],
     _queueRunning: false,
     _nextId: 1,
+    _nextTrackId: 1,
     _activeSse: null,
 
     // ── Lifecycle ─────────────────────────────────────────────────────────
@@ -48,6 +50,8 @@ function spotifyConverter() {
         const res = await fetch('/api/auth/status');
         const data = await res.json();
         this.connected = data.connected;
+        this.authError = data.error || '';
+        if (data.status) this.authStatus = data.status;
       } catch (_) {
         this.connected = false;
       } finally {
@@ -58,6 +62,7 @@ function spotifyConverter() {
     async startAuth() {
       this.authError = '';
       this.authStatus = '';
+      this.authTimedOut = false;
       this.authLoading = true;
       try {
         const res = await fetch('/api/auth/start', { method: 'POST' });
@@ -80,10 +85,12 @@ function spotifyConverter() {
             this._stopAuthPoll();
             this.connected = true;
             this.authLoading = false;
+            this.authError = '';
             this.authNeedsSignIn = false;
             this.tryPasteFromClipboard();
           } else if (data.error) {
             this._stopAuthPoll();
+            this.connected = false;
             this.authError = data.error;
             this.authLoading = false;
           }
@@ -94,6 +101,7 @@ function spotifyConverter() {
         if (this._authPollTimer) {
           this._stopAuthPoll();
           this.authError = 'Timed out. Please try again.';
+          this.authTimedOut = true;
           this.authLoading = false;
         }
       }, 5 * 60 * 1000);
@@ -103,7 +111,9 @@ function spotifyConverter() {
       this._stopAuthPoll();
       this.authLoading = false;
       this.authError = '';
+      this.authStatus = 'Connection paused.';
       this.authNeedsSignIn = false;
+      this.authTimedOut = false;
       try { await fetch('/api/auth/cancel', { method: 'POST' }); } catch (_) {}
     },
 
@@ -117,10 +127,10 @@ function spotifyConverter() {
     // ── Clipboard ─────────────────────────────────────────────────────────
 
     async tryPasteFromClipboard() {
+      if (!this.canConvert) return;
       try {
         const text = await navigator.clipboard.readText();
-        const matches = [...text.matchAll(/https?:\/\/open\.spotify\.com\/playlist\/[A-Za-z0-9]+/g)]
-          .map(m => m[0]);
+        const matches = this._extractSpotifyPlaylistUrls(text);
         if (matches.length === 1) {
           this.spotifyUrl = matches[0];
         } else if (matches.length > 1) {
@@ -130,6 +140,10 @@ function spotifyConverter() {
     },
 
     addAllSuggestions() {
+      if (!this.canConvert) {
+        this.inputError = this.readinessMessage;
+        return;
+      }
       this.clipboardSuggestions.forEach(url => this._enqueue(url));
       this.clipboardSuggestions = [];
     },
@@ -137,30 +151,83 @@ function spotifyConverter() {
     // ── Input / Queue management ──────────────────────────────────────────
 
     _cleanUrl(raw) {
-      return (raw || '').trim().split(/[\s,]+/)[0].replace(/[?#].*$/, '');
+      return (raw || '').trim().replace(/[),.;!?]+$/g, '');
+    },
+
+    _extractSpotifyPlaylistUrls(raw) {
+      const found = new Set();
+      const candidates = [...(raw || '').matchAll(/https?:\/\/[^\s<>"']+/gi)].map(m => m[0]);
+      candidates.forEach(candidate => {
+        const validation = this._validateSpotifyPlaylistUrl(candidate);
+        if (!validation.error) found.add(validation.url);
+      });
+      return [...found];
+    },
+
+    _validateSpotifyPlaylistUrl(raw) {
+      const url = this._cleanUrl(raw);
+      if (!url) {
+        return { url: '', error: 'Please enter a Spotify playlist URL.' };
+      }
+
+      let parsed;
+      try {
+        parsed = new URL(url);
+      } catch (_) {
+        return { url, error: 'That does not look like a valid URL.' };
+      }
+
+      if (parsed.protocol !== 'https:' || parsed.hostname !== 'open.spotify.com') {
+        return { url, error: 'Use a Spotify playlist URL from open.spotify.com.' };
+      }
+
+      const path = parsed.pathname.replace(/^\/intl-[a-z]{2}(?:-[a-z]{2})?/i, '');
+      const match = path.match(/^\/playlist\/([A-Za-z0-9]{22})\/?$/);
+      if (!match) {
+        return { url, error: 'That playlist URL is incomplete or invalid.' };
+      }
+
+      return { url: `https://open.spotify.com/playlist/${match[1]}`, error: '' };
     },
 
     submit() {
       this.inputError = '';
-      const url = this._cleanUrl(this.spotifyUrl);
-      if (!url) {
-        this.inputError = 'Please enter a Spotify playlist URL.';
+      if (!this.canConvert) {
+        this.inputError = this.readinessMessage;
         return;
       }
-      if (!url.includes('spotify.com/playlist/')) {
-        this.inputError = 'That doesn\'t look like a Spotify playlist URL.';
+      const urls = this._extractSpotifyPlaylistUrls(this.spotifyUrl);
+      if (urls.length === 0) {
+        this.inputError = this.urlInputError || 'No complete Spotify playlist URLs found.';
         return;
       }
-      if (this._enqueue(url)) {
+
+      let added = 0;
+      urls.forEach(url => {
+        if (this._enqueue(url)) added++;
+      });
+
+      if (added > 0) {
         this.spotifyUrl = '';
         this.clipboardSuggestions = [];
       } else {
-        this.inputError = 'That playlist is already in the queue.';
+        this.inputError = urls.length === 1
+          ? 'That playlist is already in the queue.'
+          : 'Those playlists are already in the queue.';
       }
     },
 
     _enqueue(url) {
-      url = this._cleanUrl(url);
+      if (!this.canConvert) {
+        this.inputError = this.readinessMessage;
+        return false;
+      }
+      const validation = this._validateSpotifyPlaylistUrl(url);
+      if (validation.error) {
+        this.inputError = validation.error;
+        return false;
+      }
+      url = validation.url;
       if (this.queue.some(i => i.url === url)) return false;
       this.queue.push({
         id: this._nextId++,
@@ -185,6 +252,10 @@ function spotifyConverter() {
     },
 
     retryItem(id) {
+      if (!this.canConvert) {
+        this.inputError = this.readinessMessage;
+        return;
+      }
       const item = this.queue.find(i => i.id === id);
       if (!item) return;
       item.status = 'pending';
@@ -200,10 +271,12 @@ function spotifyConverter() {
     // ── Queue processor ───────────────────────────────────────────────────
 
     _maybeStart() {
+      if (!this.canConvert) return;
       if (!this._queueRunning) this._processNext();
     },
 
     _processNext() {
+      if (!this.canConvert) { this._queueRunning = false; return; }
       const item = this.queue.find(i => i.status === 'pending');
       if (!item) { this._queueRunning = false; return; }
       this._queueRunning = true;
@@ -212,7 +285,8 @@ function spotifyConverter() {
     },
 
     _runItem(item) {
-      const sse = new EventSource(`/api/convert?url=${encodeURIComponent(item.url)}`);
+      const params = new URLSearchParams({ url: item.url });
+      const sse = new EventSource(`/api/convert?${params.toString()}`);
       this._activeSse = sse;
 
       sse.onmessage = (e) => {
@@ -238,15 +312,29 @@ function spotifyConverter() {
           case 'track':
             if (evt.status === 'found') item.found++;
             else item.missing++;
-            item.tracks.push({ name: evt.name, artists: evt.artists, status: evt.status });
+            item.tracks.push({
+              id: this._nextTrackId++,
+              name: evt.name,
+              artists: evt.artists,
+              status: evt.status,
+            });
             this.$nextTick(() => {
               const el = document.querySelector(`[data-tracks="${item.id}"]`);
-              if (el) el.scrollTop = el.scrollHeight;
+              if (el) {
+                const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+                el.scrollTo({
+                  top: el.scrollHeight,
+                  behavior: reducedMotion ? 'auto' : 'smooth',
+                });
+              }
             });
             break;
 
           case 'done':
-            item.logs.push({ time: ts, message: `Done: ${evt.found} added, ${evt.missing} not found on YouTube Music` });
+            item.logs.push({
+              time: ts,
+              message: `Done: ${evt.found} added, ${evt.missing} not found on YouTube Music`,
+            });
             item.status = 'done';
             item.playlistId = evt.playlistId || '';
             item.found = evt.found ?? item.found;
@@ -260,6 +348,11 @@ function spotifyConverter() {
             item.status = 'error';
             item.error = evt.message || 'Unknown error.';
             item.showDebug = true;  // auto-expand debug on error
+            if (this._isAuthError(item.error)) {
+              this.connected = false;
+              this.authError = item.error;
+              this.authStatus = '';
+            }
             sse.close();
             this._processNext();
             break;
@@ -307,6 +400,37 @@ function spotifyConverter() {
     // ── Helpers ───────────────────────────────────────────────────────────
 
     get queueHasItems() { return this.queue.length > 0; },
+    get canConvert()    { return this.connected && !this.checkingAuth && !this.authLoading && !this.authError; },
+    get urlInputError() {
+      if (!this.spotifyUrl.trim()) return '';
+      if (this._extractSpotifyPlaylistUrls(this.spotifyUrl).length > 0) return '';
+      if (/open\.spotify\.com\/playlist\//i.test(this.spotifyUrl)) return 'No complete Spotify playlist URLs found.';
+      return 'Paste a Spotify playlist URL, or a message containing one.';
+    },
+    get canSubmitUrl()  { return this.canConvert && this._extractSpotifyPlaylistUrls(this.spotifyUrl).length > 0; },
+    get readinessMessage() {
+      if (this.checkingAuth) return 'Checking YouTube Music connection. Please wait.';
+      if (this.authLoading) return 'Finish connecting YouTube Music before adding playlists.';
+      if (this.authError) return 'Reconnect YouTube Music before adding playlists.';
+      if (!this.connected) return 'Connect YouTube Music before adding playlists.';
+      return '';
+    },
+    get authStepTitle() {
+      if (this.authLoading) return this.authStatus || 'Connecting to YouTube Music...';
+      if (this.authTimedOut) return 'Connection timed out';
+      if (this.authError) return 'YouTube Music needs reconnecting';
+      return 'Connect YouTube Music to continue';
+    },
+    get authStepBody() {
+      if (this.authNeedsSignIn) return 'Sign in to your Google account in the browser window. Conversion stays locked until this succeeds.';
+      if (this.authLoading) return 'The app is looking for valid YouTube Music credentials on this device.';
+      if (this.authTimedOut) return 'Automatic connection waited too long. Sign in to YouTube Music in Chrome or Brave, then retry.';
+      if (this.authError) return this.authError;
+      return 'The converter unlocks only after valid YouTube Music credentials are found.';
+    },
+    get manualHelpTitle() {
+      return this.authTimedOut ? 'Manual recovery' : 'If reconnect keeps failing';
+    },
     get pendingCount()  { return this.queue.filter(i => i.status === 'pending').length; },
     get activeItem()    { return this.queue.find(i => i.status === 'active') || null; },
     get progress()      {
@@ -315,9 +439,23 @@ function spotifyConverter() {
       return Math.round(((a.found + a.missing) / a.total) * 100);
     },
 
+    leftCount(item) {
+      if (!item || !item.total) return 0;
+      return Math.max(item.total - item.found - item.missing, 0);
+    },
+
+    itemProgress(item) {
+      if (!item || !item.total) return 0;
+      return Math.min(100, Math.round(((item.found + item.missing) / item.total) * 100));
+    },
+
     shortUrl(url) {
       const m = url.match(/playlist\/([A-Za-z0-9]+)/);
       return m ? `spotify:playlist:${m[1].slice(0, 8)}…` : url;
+    },
+
+    _isAuthError(message) {
+      return /youtube music (not connected|credentials|auth|login|sign in|reconnect|expired)/i.test(message || '');
     },
   };
 }
