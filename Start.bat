@@ -1,57 +1,48 @@
 @echo off
 cd /d "%~dp0"
 
-echo.
+echo(
 echo   Spotify ^> YouTube Music
 echo   ----------------------------------------
-echo.
+echo(
 
-:: ── Python check ──────────────────────────────────────────────────────────
-:: Try py launcher first (installed with Python, always in C:\Windows\)
+rem Python check
 set PYTHON=
 py --version >nul 2>&1
-if %errorlevel% == 0 (
-    set PYTHON=py
-) else (
-    python --version >nul 2>&1
-    if %errorlevel% == 0 (
-        set PYTHON=python
-    )
-)
+if not errorlevel 1 set PYTHON=py
+if defined PYTHON goto :venv
+python --version >nul 2>&1
+if not errorlevel 1 set PYTHON=python
+if defined PYTHON goto :venv
 
-if "%PYTHON%" == "" (
-    echo   Python is not installed. We opened python.org for you.
-    echo.
-    echo   IMPORTANT: During install, check the box "Add Python to PATH"
-    echo   Then close and re-run Start.bat
-    echo.
-    start https://www.python.org/downloads/windows/
-    pause
-    exit /b 1
-)
+echo   Python is not installed. We opened python.org for you.
+echo(
+echo   IMPORTANT: During install, check the box "Add Python to PATH"
+echo   Then close and re-run Start.bat
+echo(
+start https://www.python.org/downloads/windows/
+pause
+exit /b 1
 
-:: ── Step 1: Virtual environment ───────────────────────────────────────────
+:venv
 if exist ".venv\" (
-    echo   Step 1/3: Environment ready v
+    echo   Step 1/3: Environment ready
 ) else (
-    echo   Step 1/3: Creating environment (first time only)...
+    echo   Step 1/3: Creating environment - first time only
     %PYTHON% -m venv .venv
 )
 
 call .venv\Scripts\activate.bat
 
-:: ── Step 2: Dependencies ──────────────────────────────────────────────────
 echo   Step 2/3: Installing tools (first time: ~2 min)...
 python -m pip install -r requirements.txt --quiet
 
-:: ── Step 3: Launch ────────────────────────────────────────────────────────
 echo   Step 3/3: Starting app -- your browser will open automatically
-echo.
-echo   ─────────────────────────────────────────
+echo(
+echo   -------------------------------------------------
 echo   Keep this window open. Close it to stop the app.
-echo   ─────────────────────────────────────────
-echo.
+echo   -------------------------------------------------
+echo(
 
 %PYTHON% app.py
-
 pause

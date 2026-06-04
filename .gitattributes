@@ -1,0 +1,10 @@
+# Windows batch files must be CRLF — cmd.exe breaks on LF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+
+# Shell scripts must be LF — Unix shells break on CRLF
+*.sh    text eol=lf
+*.command text eol=lf
+
+# Python source — keep consistent
+*.py    text diff=python
