@@ -7,9 +7,13 @@ Strategy (tried in order):
      SQLite database using Python + macOS Keychain. Instant, no browser window,
      works even when Brave is running.
 
-  2. Playwright bundled Chromium — opens a fresh browser window, user signs in
-     to Google once (~30 sec), headers are captured automatically. Used only if
-     browser_cookie3 can't find valid YouTube Music cookies.
+  2. Real Chrome (Playwright, channel:"chrome") — opens the user's actual Chrome
+     window (not headless), navigates to music.youtube.com, user signs in once.
+     Real Chrome avoids Google's "unsupported browser" detection that blocks
+     login in test/automated browsers. Headers captured automatically.
+     Used only if browser_cookie3 can't find valid YouTube Music cookies.
+
+  3. Playwright bundled Chromium — fallback if real Chrome isn't available.
 """
 from __future__ import annotations
 
@@ -159,30 +163,64 @@ def _write_headers_json(cookie_str: str) -> None:
 
 async def _capture_via_playwright() -> None:
     """
-    Launch a fresh Playwright Chromium window, navigate to music.youtube.com,
-    wait for the user to sign in, capture the first authenticated request headers.
+    Open a browser window, navigate to music.youtube.com, wait for the user to
+    sign in, capture the auth cookies from the browser's cookie store.
+
+    Uses the user's real Chrome installation (channel: "chrome") on Windows so
+    Google's login doesn't flag it as an automated/test browser. Falls back to
+    Playwright's bundled Chromium if real Chrome isn't found or fails.
+
+    Instead of sniffing the first request header (which can fire before all
+    cookies are fully established), this reads cookies directly from the
+    browser's cookie jar after detecting a completed sign-in — ensuring
+    __Secure-3PAPISID and other required cookies are present.
     """
     global playwright_active
     from playwright.async_api import async_playwright
 
-    captured: dict = {}
     ready = asyncio.Event()
 
     async with async_playwright() as pw:
-        launch_args = ["--no-first-run", "--no-default-browser-check"]
+        # ── Launch browser ──────────────────────────────────────────────
+        launch_kwargs: dict = {
+            "headless": False,
+            "args": [
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--disable-blink-features=AutomationControlled",
+            ],
+        }
+        if sys.platform == "win32":
+            launch_kwargs["channel"] = "chrome"
+
         try:
-            browser = await pw.chromium.launch(headless=False, args=launch_args)
-        except Exception:
-            import subprocess
-            print("[auth] Installing Playwright Chromium (one-time, ~150 MB)...")
-            subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
-            browser = await pw.chromium.launch(headless=False, args=launch_args)
+            browser = await pw.chromium.launch(**launch_kwargs)
+        except Exception as e:
+            if launch_kwargs.get("channel"):
+                print(f"[auth] Could not launch real Chrome ({e}), falling back to bundled Chromium…")
+                launch_kwargs.pop("channel", None)
+                try:
+                    browser = await pw.chromium.launch(**launch_kwargs)
+                except Exception:
+                    raise
+            else:
+                import subprocess
+                print("[auth] Installing Playwright Chromium (one-time, ~150 MB)...")
+                subprocess.check_call([sys.executable, "-m", "playwright", "install", "chromium"])
+                browser = await pw.chromium.launch(**launch_kwargs)
 
         playwright_active = True
         context = await browser.new_context()
+
+        # Hide automation signals so Google login doesn't block the session
+        await context.add_init_script("""
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+        """)
+
         page = await context.new_page()
 
-        async def handle_request(request):
+        async def on_request(request):
+            """Watch for auth cookies appearing in outgoing requests."""
             if ready.is_set() or "music.youtube.com" not in request.url:
                 return
             try:
@@ -190,10 +228,12 @@ async def _capture_via_playwright() -> None:
             except Exception:
                 headers = dict(request.headers)
             if any(c in headers.get("cookie", "") for c in _AUTH_COOKIES):
-                captured.update(headers)
+                # Signal sign-in completed — cookies will be read from the
+                # browser's cookie jar below, which is more complete than
+                # this early-arriving request header.
                 ready.set()
 
-        page.on("request", handle_request)
+        page.on("request", on_request)
         await page.goto("https://music.youtube.com")
 
         try:
@@ -203,14 +243,35 @@ async def _capture_via_playwright() -> None:
             playwright_active = False
             raise RuntimeError("Timed out waiting for sign-in (5 min limit).")
 
+        # ── Read cookies from the browser's cookie jar ──────────────────
+        # This is more reliable than the first request's Cookie header,
+        # because the cookie jar has the final, fully-established auth state
+        # including __Secure-3PAPISID which ytmusicapi requires.
+        await asyncio.sleep(1.5)
+        jar = await context.cookies(urls=["https://music.youtube.com", "https://youtube.com"])
+        cookie_parts = []
+        has_secure = False
+        for c in jar:
+            cookie_parts.append(f"{c['name']}={c['value']}")
+            if c["name"] == "__Secure-3PAPISID":
+                has_secure = True
+
+        if not has_secure:
+            # Give a bit more time for the secure cookie to land
+            await asyncio.sleep(3)
+            jar = await context.cookies(urls=["https://music.youtube.com", "https://youtube.com"])
+            cookie_parts = []
+            for c in jar:
+                cookie_parts.append(f"{c['name']}={c['value']}")
+                if c["name"] == "__Secure-3PAPISID":
+                    has_secure = True
+
+        cookie_str = "; ".join(cookie_parts)
+
         await browser.close()
         playwright_active = False
 
-    if not captured:
-        raise RuntimeError("No authenticated headers captured.")
-
-    cookie_str = captured.get("cookie", "")
     if not cookie_str:
-        raise RuntimeError("Captured headers had no cookie field.")
+        raise RuntimeError("No cookies captured from browser.")
 
     _write_headers_json(cookie_str)
