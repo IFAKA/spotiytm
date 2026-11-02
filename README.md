@@ -73,3 +73,11 @@ checkpoints/            Runtime: per-conversion checkpoint files (git-ignored)
 - Playlist conversion is limited to tracks found on YouTube Music; missing tracks are listed at the end
 - `oauth.json` and `headers_auth.json` contain your credentials — never commit them
 - If Spotify changes their embed page structure, update the `__NEXT_DATA__` path in `backend/spotify.py`
+
+---
+
+## Support
+
+If this project is useful to you, you can support my work:
+
+[![Support me on Ko-fi](https://ko-fi.com/img/githubbutton_sm.svg)](https://ko-fi.com/zfaka)
